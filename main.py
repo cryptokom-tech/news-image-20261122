@@ -1,66 +1,58 @@
 #!/usr/bin/env python3
-"""news-image-20261122 entry: write the front-page image to the output.
+"""Entry program for the make.fun bounty news-image-20261122.
 
-The image (entry.png, 1024x1024) sums up Sunday 22 November 2026's
-world news — the round 1 morning edition: 36 numbered stories from
-six continents, a dotted world map with a numbered pin per story, and
-a red banner naming the day. It was drawn by the build script in the
-work session and is bundled here.
-
-This program only copies the bundled image to the output path, after
-checking the PNG signature, the IHDR dimensions, the 1 MiB size
-limit and the IEND chunk, and confirming the written bytes match the
-bundle. Standard library only, no network, and every run writes the
-exact same bytes.
+The repository ships a single finished picture, entry.png, that sums
+up Sunday 22 November 2026's world news as a newspaper front page:
+36 numbered stories, a dotted world map with a numbered pin for
+each story, and a red banner naming the day. All this program does
+is place that picture at the path the grader expects, after making
+sure the file is a well-formed PNG of the right size. It needs no
+network, installs nothing, and writes the same bytes on every run.
 """
 
+import hashlib
 import os
-import struct
 import sys
 
-MAX_BYTES = 1_048_576
-EXPECT_W, EXPECT_H = 1024, 1024
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+HERE = os.path.dirname(os.path.abspath(__file__))
+BUNDLED = os.path.join(HERE, "entry.png")
+LIMIT = 1024 * 1024
+MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def read_bundle():
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "entry.png")
-    with open(path, "rb") as fh:
-        return fh.read()
+def load_and_check():
+    with open(BUNDLED, "rb") as handle:
+        blob = handle.read()
+    if len(blob) > LIMIT:
+        raise SystemExit(f"entry.png is {len(blob)} bytes, over the 1 MiB limit")
+    if blob[:8] != MAGIC:
+        raise SystemExit("entry.png does not start with the PNG signature")
+    width = int.from_bytes(blob[16:20], "big")
+    height = int.from_bytes(blob[20:24], "big")
+    if (width, height) != (1024, 1024):
+        raise SystemExit(f"entry.png is {width}x{height}, expected 1024x1024")
+    if b"IEND" not in blob[-12:]:
+        raise SystemExit("entry.png is missing its IEND chunk")
+    return blob
 
 
-def check_png(data):
-    """Check magic, size, and IHDR dimensions; return (width, height)."""
-    if len(data) > MAX_BYTES:
-        raise SystemExit(f"entry.png too large: {len(data)} bytes")
-    if data[:8] != PNG_MAGIC:
-        raise SystemExit("entry.png is not a PNG file")
-    if len(data) < 33 or data[12:16] != b"IHDR":
-        raise SystemExit("entry.png has no IHDR chunk")
-    width, height = struct.unpack(">II", data[16:24])
-    if (width, height) != (EXPECT_W, EXPECT_H):
-        raise SystemExit(f"unexpected size {width}x{height}")
-    if b"IEND" not in data[-12:]:
-        raise SystemExit("entry.png has no IEND chunk")
-    return width, height
-
-
-def main():
-    data = read_bundle()
-    width, height = check_png(data)
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "entry.png")
-    with open(out_path, "wb") as fh:
-        fh.write(data)
-    with open(out_path, "rb") as fh:
-        written = fh.read()
-    if written != data:
-        raise SystemExit("written bytes differ from the bundle")
-    print(f"wrote {out_path} ({width}x{height}, {len(data)} bytes)")
+def run():
+    blob = load_and_check()
+    target_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
+    os.makedirs(target_dir, exist_ok=True)
+    target = os.path.join(target_dir, "entry.png")
+    with open(target, "wb") as handle:
+        handle.write(blob)
+    with open(target, "rb") as handle:
+        again = handle.read()
+    if again != blob:
+        raise SystemExit("the file written to /output differs from the bundle")
+    if len(again) != len(blob):
+        raise SystemExit("the file written to /output has the wrong size")
+    digest = hashlib.sha256(blob).hexdigest()
+    print(f"wrote {target} ({len(blob)} bytes, sha256 {digest})")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
